@@ -24,34 +24,55 @@ metrics = Metrics(namespace="DemoApp", service="checkout-service")
 class FaultInjector:
     """Manages fault injection scenarios"""
 
-    SCENARIOS = {
+    # Fault injection scenarios
+    FAULT_SCENARIOS = {
         "normal": {
             "db_timeout_rate": 0.05,
             "slow_query_rate": 0.10,
-            "exception_rate": 0.02,
-            "success_rate": 0.83,
+            "exception_rate": 0.05,
+            "db_pool_size": 10,
+            "concurrent_calls": 1,
+            "query_duration_ms": 150,
+            "timeout_ms": 5000,
         },
         "db_pool_exhaustion": {
-            "db_timeout_rate": 0.50,  # 50% timeout (5 concurrent calls > 3 pool size)
-            "slow_query_rate": 0.30,  # 30% slow queries
+            "db_timeout_rate": 0.50,
+            "slow_query_rate": 0.30,
             "exception_rate": 0.00,
-            "db_pool_size": 3,  # Max 3 DB connections
-            "concurrent_calls": 5,  # App tries 5 concurrent calls
-            "query_duration_ms": 150,  # Each query takes 150ms
-            "timeout_ms": 5000,  # Timeout after 5s waiting for connection
-            "description": "DB pool has 3 connections but app makes 5 concurrent calls",
+            "db_pool_size": 3,
+            "concurrent_calls": 5,
+            "query_duration_ms": 150,
+            "timeout_ms": 5000,
+        },
+        "deployment_config_bug": {
+            # Simulates bad config deployed 15 mins ago
+            # Symptoms: 40% timeout rate + 2000ms latency spikes
+            "db_timeout_rate": 0.40,
+            "slow_query_rate": 0.40,
+            "exception_rate": 0.10,
+            "db_pool_size": 5,  # Config changed from 10 → 5 (bad!)
+            "concurrent_calls": 8,  # Load increased but pool decreased
+            "query_duration_ms": 2000,  # Latency spike to 2000ms
+            "timeout_ms": 3000,  # Aggressive timeout
+            "deployment_time_offset_mins": 15,  # Triggered 15 mins after deploy
         },
         "memory_leak": {
-            "db_timeout_rate": 0.05,
+            "db_timeout_rate": 0.10,
             "slow_query_rate": 0.20,
-            "exception_rate": 0.02,
-            "additional_latency_ms": 0,  # Calculated dynamically
+            "exception_rate": 0.15,
+            "db_pool_size": 10,
+            "concurrent_calls": 1,
+            "query_duration_ms": 300,
+            "timeout_ms": 5000,
         },
         "cascading_failure": {
             "db_timeout_rate": 0.70,
             "slow_query_rate": 0.20,
             "exception_rate": 0.10,
-            "success_rate": 0.00,
+            "db_pool_size": 2,
+            "concurrent_calls": 10,
+            "query_duration_ms": 500,
+            "timeout_ms": 2000,
         },
     }
 
@@ -129,6 +150,20 @@ def simulate_database_query(order_id: str, user_id: str) -> Dict[str, Any]:
         query_duration = random.randint(4500, 5500)  # Original query duration for timeout
         actual_wait_time = timeout_threshold if concurrent_calls > db_pool_size else query_duration
 
+        # Check if this is deployment-related
+        deployment_info = {}
+        if fault_config.get("deployment_time_offset_mins"):
+            from datetime import datetime, timedelta
+
+            deploy_time = datetime.now() - timedelta(
+                minutes=fault_config["deployment_time_offset_mins"]
+            )
+            deployment_info = {
+                "possibly_deployment_related": True,
+                "recent_deployment_time": deploy_time.isoformat(),
+                "minutes_since_deployment": fault_config["deployment_time_offset_mins"],
+            }
+
         logger.error(
             "Database connection timeout - pool exhausted",
             extra={
@@ -142,6 +177,7 @@ def simulate_database_query(order_id: str, user_id: str) -> Dict[str, Any]:
                 "order_id": order_id,
                 "user_id": user_id,
                 "fault_scenario": scenario,
+                **deployment_info,
             },
         )
         metrics.add_metric(name="db_timeout", unit=MetricUnit.Count, value=1)
@@ -161,17 +197,56 @@ def simulate_database_query(order_id: str, user_id: str) -> Dict[str, Any]:
         )
         time.sleep(query_duration / 1000)
 
-        logger.warning(
-            "Slow database query detected",
-            extra={
-                "order_id": order_id,
-                "user_id": user_id,
-                "query_duration_ms": query_duration,
-                "query_type": "SELECT",
-                "table": "orders",
-                "fault_scenario": scenario,
-            },
+        # Check if latency is extremely high (2000ms+)
+        is_latency_spike = query_duration >= 2000
+        log_level = "error" if is_latency_spike else "warning"
+
+        # Check deployment correlation
+        deployment_info = {}
+        if fault_config.get("deployment_time_offset_mins"):
+            from datetime import datetime, timedelta
+
+            deploy_time = datetime.now() - timedelta(
+                minutes=fault_config["deployment_time_offset_mins"]
+            )
+            deployment_info = {
+                "possibly_deployment_related": True,
+                "recent_deployment_time": deploy_time.isoformat(),
+                "minutes_since_deployment": fault_config["deployment_time_offset_mins"],
+            }
+
+        log_msg = (
+            "LATENCY SPIKE - Query took 2000ms+"
+            if is_latency_spike
+            else "Slow database query detected"
         )
+
+        if is_latency_spike:
+            logger.error(
+                log_msg,
+                extra={
+                    "order_id": order_id,
+                    "user_id": user_id,
+                    "query_duration_ms": query_duration,
+                    "latency_threshold_exceeded": "2000ms",
+                    "query_type": "SELECT",
+                    "table": "orders",
+                    "fault_scenario": scenario,
+                    **deployment_info,
+                },
+            )
+        else:
+            logger.warning(
+                log_msg,
+                extra={
+                    "order_id": order_id,
+                    "user_id": user_id,
+                    "query_duration_ms": query_duration,
+                    "query_type": "SELECT",
+                    "table": "orders",
+                    "fault_scenario": scenario,
+                },
+            )
 
         metrics.add_metric(name="SlowQueries", unit=MetricUnit.Count, value=1)
         return {"status": "success", "latency": "high", "duration_ms": query_duration}
