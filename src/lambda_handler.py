@@ -311,7 +311,7 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
     """
 
     # Extract order details
-    order_id = event.get("order_id", f"ORD-{context.request_id[:8].upper()}")
+    order_id = event.get("order_id", f"ORD-{context.aws_request_id[:8].upper()}")
     user_id = event.get("user_id", f"USER-{random.randint(1000, 9999)}")
 
     # Log scenario info
