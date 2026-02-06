@@ -85,7 +85,9 @@ class FaultInjector:
     def get_fault_config() -> Dict[str, float]:
         """Get fault injection configuration for active scenario"""
         scenario = FaultInjector.get_active_scenario()
-        config = FaultInjector.SCENARIOS.get(scenario, FaultInjector.SCENARIOS["normal"])
+        config = FaultInjector.FAULT_SCENARIOS.get(
+            scenario, FaultInjector.FAULT_SCENARIOS["normal"]
+        )
 
         # For memory leak, calculate dynamic latency
         if scenario == "memory_leak":
@@ -199,7 +201,6 @@ def simulate_database_query(order_id: str, user_id: str) -> Dict[str, Any]:
 
         # Check if latency is extremely high (2000ms+)
         is_latency_spike = query_duration >= 2000
-        log_level = "error" if is_latency_spike else "warning"
 
         # Check deployment correlation
         deployment_info = {}
