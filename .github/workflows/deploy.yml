@@ -1,0 +1,146 @@
+name: Deploy Demo Checkout Service
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  test:
+    name: Run Tests & Linting
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      
+      - name: Add uv to PATH
+        run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      
+      - name: Install dependencies
+        run: |
+          cd ${{ github.workspace }}
+          uv sync --dev
+      
+      - name: Run tests
+        run: |
+          cd ${{ github.workspace }}
+          uv run pytest tests/ -v --cov=src --cov-report=term-missing
+      
+      - name: Run type checking
+        run: |
+          cd ${{ github.workspace }}
+          uv run mypy src/ || true
+      
+      - name: Run linting
+        run: |
+          cd ${{ github.workspace }}
+          uv run ruff check src/
+
+  package:
+    name: Package Lambda Function
+    needs: test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      
+      - name: Add uv to PATH
+        run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      
+      - name: Package Lambda
+        run: |
+          cd ${{ github.workspace }}
+          bash scripts/package.sh
+      
+      - name: Upload Lambda package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-package
+          path: lambda-package.zip
+          retention-days: 7
+
+  deploy-dev:
+    name: Deploy to Dev Environment
+    needs: package
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    environment: development
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download Lambda package
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-package
+          path: .
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+      
+      - name: Terraform Init
+        run: |
+          cd terraform
+          terraform init
+      
+      - name: Terraform Plan
+        run: |
+          cd terraform
+          terraform plan -out=tfplan \
+            -var="environment=dev" \
+            -var="fault_scenario=${{ vars.FAULT_SCENARIO || 'normal' }}"
+      
+      - name: Terraform Apply
+        run: |
+          cd terraform
+          terraform apply -auto-approve tfplan
+      
+      - name: Get Lambda Function URL
+        id: get-url
+        run: |
+          cd terraform
+          FUNCTION_URL=$(terraform output -raw function_url 2>/dev/null || echo "Not available")
+          echo "function_url=$FUNCTION_URL" >> $GITHUB_OUTPUT
+      
+      - name: Post deployment summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Environment:** Development" >> $GITHUB_STEP_SUMMARY
+          echo "🚀 **Function URL:** ${{ steps.get-url.outputs.function_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "📦 **Package:** lambda-package.zip" >> $GITHUB_STEP_SUMMARY
+          echo "🕒 **Deployed at:** $(date -u)" >> $GITHUB_STEP_SUMMARY
