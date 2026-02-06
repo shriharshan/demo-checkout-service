@@ -120,9 +120,7 @@ jobs:
       - name: Terraform Plan
         run: |
           cd terraform
-          terraform plan -out=tfplan \
-            -var="environment=dev" \
-            -var="fault_scenario=${{ vars.FAULT_SCENARIO || 'normal' }}"
+          terraform plan -out=tfplan -var="environment=dev"
       
       - name: Terraform Apply
         run: |
