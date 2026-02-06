@@ -139,9 +139,9 @@ jobs:
       - name: Get deployment outputs
         id: get-outputs
         run: |
-          cd terraform
-          FUNCTION_NAME=$(terraform output -raw function_name 2>/dev/null || echo "demo-checkout-service")
-          FUNCTION_ARN=$(terraform output -raw function_arn 2>/dev/null || echo "Not available")
+          # Get Lambda info directly from AWS instead of Terraform outputs
+          FUNCTION_NAME="demo-checkout-service"
+          FUNCTION_ARN=$(aws lambda get-function --function-name $FUNCTION_NAME --region us-east-1 --query 'Configuration.FunctionArn' --output text 2>/dev/null || echo "Not available")
           echo "function_name=$FUNCTION_NAME" >> $GITHUB_OUTPUT
           echo "function_arn=$FUNCTION_ARN" >> $GITHUB_OUTPUT
       
