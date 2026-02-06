@@ -113,6 +113,12 @@ def simulate_database_query(order_id: str, user_id: str) -> Dict[str, Any]:
     fault_config = FaultInjector.get_fault_config()
     scenario = FaultInjector.get_active_scenario()
 
+    # Get DB pool configuration (needed for timeout error reporting)
+    db_pool_size = fault_config.get("db_pool_size", 10)
+    concurrent_calls = fault_config.get("concurrent_calls", 1)
+    base_query_duration = fault_config.get("query_duration_ms", 150)
+    timeout_threshold = fault_config.get("timeout_ms", 5000)
+
     # Determine fault type based on probabilities
     fault_roll = random.random()
 
@@ -149,11 +155,6 @@ def simulate_database_query(order_id: str, user_id: str) -> Dict[str, Any]:
     elif fault_roll < fault_config.get("db_timeout_rate", 0) + fault_config.get(
         "slow_query_rate", 0
     ):
-        db_pool_size = fault_config.get("db_pool_size", 10)
-        concurrent_calls = fault_config.get("concurrent_calls", 1)
-        base_query_duration = fault_config.get("query_duration_ms", 150)
-        timeout_threshold = fault_config.get("timeout_ms", 5000)
-
         # Simulate query duration (with some variance)
         query_duration = random.randint(
             int(base_query_duration * 0.8), int(base_query_duration * 1.2)
@@ -165,7 +166,7 @@ def simulate_database_query(order_id: str, user_id: str) -> Dict[str, Any]:
             extra={
                 "order_id": order_id,
                 "user_id": user_id,
-                "query_duration_ms": slow_duration,
+                "query_duration_ms": query_duration,
                 "query_type": "SELECT",
                 "table": "orders",
                 "fault_scenario": scenario,
@@ -173,7 +174,7 @@ def simulate_database_query(order_id: str, user_id: str) -> Dict[str, Any]:
         )
 
         metrics.add_metric(name="SlowQueries", unit=MetricUnit.Count, value=1)
-        return {"status": "success", "latency": "high", "duration_ms": slow_duration}
+        return {"status": "success", "latency": "high", "duration_ms": query_duration}
 
     # Inject unhandled exception
     elif fault_roll < (
