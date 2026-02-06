@@ -24,6 +24,12 @@ class MockLambdaContext:
         self.function_version = "$LATEST"
         self.function_name = "demo-checkout-service"
         self.memory_limit_in_mb = 512
+        self.invoked_function_arn = (
+            "arn:aws:lambda:us-east-1:123456789012:function:demo-checkout-service"
+        )
+        self.aws_request_id = self.request_id
+        self.log_group_name = "/aws/lambda/demo-checkout-service"
+        self.log_stream_name = f"2026/02/06/[$LATEST]{self.request_id}"
 
 
 def test_scenario(scenario_name: str, num_requests: int = 5):
@@ -44,7 +50,7 @@ def test_scenario(scenario_name: str, num_requests: int = 5):
     results = {"success": 0, "timeout": 0, "error": 0}
 
     for i in range(num_requests):
-        print(f"\n📤 Request {i + 1}/{num_requests}")
+        print(f"Request {i + 1}/{num_requests}")
         print("-" * 40)
 
         # Create test event

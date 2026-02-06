@@ -305,6 +305,11 @@ if __name__ == "__main__":
     class MockContext:
         request_id = "local-test-123"
         function_version = "$LATEST"
+        invoked_function_arn = (
+            "arn:aws:lambda:us-east-1:123456789012:function:demo-checkout-service"
+        )
+        memory_limit_in_mb = 512
+        function_name = "demo-checkout-service"
 
     test_event = {"order_id": "TEST-001", "user_id": "USER-9999"}
 
