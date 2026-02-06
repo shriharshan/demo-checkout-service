@@ -321,7 +321,7 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
         extra={
             "order_id": order_id,
             "user_id": user_id,
-            "request_id": context.request_id,
+            "request_id": context.aws_request_id,
             "fault_scenario": scenario,
             "function_version": context.function_version,
         },
